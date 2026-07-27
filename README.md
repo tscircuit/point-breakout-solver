@@ -3,7 +3,7 @@
 An octilinear breakout router for connecting points inside a rectangular region
 to its boundary without route intersections.
 
-[Open the interactive demo](https://octilinear-boundary-router-lab.seveibar.chatgpt.site)
+[Open the interactive demo](https://point-breakout-solver.vercel.app)
 
 The included reference configuration uses a `10 × 10` field, `0.10`-wide
 routes, and a `0.10` edge-to-edge margin. Because the routes are `0.10` wide,

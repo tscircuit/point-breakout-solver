@@ -8,7 +8,7 @@
     "type": "git",
     "url": "git+https://github.com/tscircuit/point-breakout-solver.git"
   },
-  "homepage": "https://octilinear-boundary-router-lab.seveibar.chatgpt.site",
+  "homepage": "https://point-breakout-solver.vercel.app",
   "keywords": [
     "autorouter",
     "breakout-routing",
