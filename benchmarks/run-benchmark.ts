@@ -18,10 +18,15 @@ for (const dataset of pointBreakoutDatasets) {
       sample: sample.id,
       points: sample.pointCount,
       seed: sample.seed,
+      obstacles: sample.problem.obstacles?.length ?? 0,
       attempts: output.attempts,
       routed: output.routedCount,
       intersections: output.verification.intersections,
+      obstacleCollisions: output.verification.obstacleCollisions,
       minClearance: Number(output.verification.minClearance.toFixed(3)),
+      minObstacleClearance: Number(
+        output.verification.minObstacleClearance.toFixed(3),
+      ),
       milliseconds: Number(elapsedMs.toFixed(2)),
       success: output.success,
     })

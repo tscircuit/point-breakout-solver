@@ -9,7 +9,10 @@ import {
   FIELD_SIZE,
   normalizePoint,
   type Point,
+  pointRectDistance,
   REQUIRED_CENTERLINE_CLEARANCE,
+  REQUIRED_OBSTACLE_CLEARANCE,
+  type RectObstacle,
   ROUTE_MARGIN,
   ROUTE_WIDTH,
   type Route,
@@ -21,6 +24,7 @@ import {
 
 export interface PointBreakoutProblem {
   points: Point[]
+  obstacles?: RectObstacle[]
   seed?: number
   maxAttempts?: number
   name?: string
@@ -32,9 +36,17 @@ export interface TerminalConflict {
   distance: number
 }
 
+export interface ObstacleConflict {
+  pointId: number
+  obstacleId: string
+  distance: number
+}
+
 export interface PreparedPointSet {
   points: Point[]
+  obstacles: RectObstacle[]
   terminalConflicts: TerminalConflict[]
+  obstacleConflicts: ObstacleConflict[]
 }
 
 export interface RoutePointSetOutput {
@@ -47,7 +59,9 @@ export interface RoutePointSetOutput {
 }
 
 export interface PointBreakoutOutput extends SolveResult {
+  obstacles: RectObstacle[]
   terminalConflicts: TerminalConflict[]
+  obstacleConflicts: ObstacleConflict[]
 }
 
 function pointDistance(a: Point, b: Point): number {
@@ -58,6 +72,7 @@ function visualizePointSet(
   points: Point[],
   routes: Route[] = [],
   status?: string,
+  obstacles: RectObstacle[] = [],
 ): GraphicsObject {
   return {
     lines: [
@@ -96,7 +111,14 @@ function visualizePointSet(
           },
         ]
       : [],
-    rects: [],
+    rects: obstacles.map((obstacle, index) => ({
+      center: obstacle.center,
+      width: obstacle.width,
+      height: obstacle.height,
+      fill: "#f9731633",
+      stroke: "#c2410c",
+      label: obstacle.id ?? `Obstacle ${index + 1}`,
+    })),
     circles: [],
   }
 }
@@ -104,6 +126,7 @@ function visualizePointSet(
 export class PreparePointSetSolver extends BaseSolver {
   private readonly normalizedPoints: Point[] = []
   private readonly terminalConflicts: TerminalConflict[] = []
+  private readonly obstacleConflicts: ObstacleConflict[] = []
   private nextPointIndex = 0
 
   constructor(public readonly problem: PointBreakoutProblem) {
@@ -116,7 +139,9 @@ export class PreparePointSetSolver extends BaseSolver {
     if (!inputPoint) {
       this.stats = {
         pointCount: this.normalizedPoints.length,
+        obstacleCount: this.problem.obstacles?.length ?? 0,
         terminalConflicts: this.terminalConflicts.length,
+        obstacleConflicts: this.obstacleConflicts.length,
         fieldSize: FIELD_SIZE,
         routeWidth: ROUTE_WIDTH,
         routeMargin: ROUTE_MARGIN,
@@ -132,6 +157,21 @@ export class PreparePointSetSolver extends BaseSolver {
         this.terminalConflicts.push({
           pointA: other.id,
           pointB: point.id,
+          distance,
+        })
+      }
+    }
+    for (
+      let obstacleIndex = 0;
+      obstacleIndex < (this.problem.obstacles?.length ?? 0);
+      obstacleIndex += 1
+    ) {
+      const obstacle = this.problem.obstacles![obstacleIndex]
+      const distance = pointRectDistance(point, obstacle)
+      if (distance < REQUIRED_OBSTACLE_CLEARANCE - 1e-7) {
+        this.obstacleConflicts.push({
+          pointId: point.id,
+          obstacleId: obstacle.id ?? `obstacle-${obstacleIndex}`,
           distance,
         })
       }
@@ -153,7 +193,9 @@ export class PreparePointSetSolver extends BaseSolver {
   override getOutput(): PreparedPointSet {
     return {
       points: [...this.normalizedPoints],
+      obstacles: [...(this.problem.obstacles ?? [])],
       terminalConflicts: [...this.terminalConflicts],
+      obstacleConflicts: [...this.obstacleConflicts],
     }
   }
 
@@ -162,6 +204,7 @@ export class PreparePointSetSolver extends BaseSolver {
       this.normalizedPoints,
       [],
       `Prepare · ${this.normalizedPoints.length}/${this.problem.points.length} points`,
+      this.problem.obstacles ?? [],
     )
   }
 }
@@ -176,12 +219,13 @@ export class RoutePointSetSolver extends BaseSolver {
   private readonly startedAt = performance.now()
   private bestRoutes: Route[] = []
   private bestUnrouted: number[]
-  private bestVerification = verifyRoutes([])
+  private bestVerification: Verification
   private attempts = 0
 
   constructor(public readonly params: RoutePointSetParams) {
     super()
     this.bestUnrouted = params.prepared.points.map((point) => point.id)
+    this.bestVerification = verifyRoutes([], params.prepared.obstacles)
     this.MAX_ITERATIONS = params.maxAttempts + 1
   }
 
@@ -195,8 +239,12 @@ export class RoutePointSetSolver extends BaseSolver {
       this.params.prepared.points,
       this.attempts,
       this.params.seed,
+      this.params.prepared.obstacles,
     )
-    const verification = verifyRoutes(candidate.routes)
+    const verification = verifyRoutes(
+      candidate.routes,
+      this.params.prepared.obstacles,
+    )
     this.attempts += 1
 
     if (
@@ -214,7 +262,9 @@ export class RoutePointSetSolver extends BaseSolver {
       routed: this.bestRoutes.length,
       unrouted: this.bestUnrouted.length,
       intersections: this.bestVerification.intersections,
+      obstacleCollisions: this.bestVerification.obstacleCollisions,
       minClearance: this.bestVerification.minClearance,
+      minObstacleClearance: this.bestVerification.minObstacleClearance,
     }
 
     if (
@@ -254,6 +304,7 @@ export class RoutePointSetSolver extends BaseSolver {
       this.params.prepared.points,
       this.bestRoutes,
       `Route · attempt ${this.attempts}/${this.params.maxAttempts} · ${this.bestRoutes.length}/${this.params.prepared.points.length} routed`,
+      this.params.prepared.obstacles,
     )
   }
 }
@@ -272,9 +323,13 @@ export class VerifyPointBreakoutSolver extends BaseSolver {
   }
 
   override _step(): void {
-    const verification = verifyRoutes(this.params.routed.routes)
+    const verification = verifyRoutes(
+      this.params.routed.routes,
+      this.params.prepared.obstacles,
+    )
     const success =
       this.params.prepared.terminalConflicts.length === 0 &&
+      this.params.prepared.obstacleConflicts.length === 0 &&
       this.params.routed.unrouted.length === 0 &&
       this.params.routed.routes.length === this.params.prepared.points.length &&
       verification.valid
@@ -283,15 +338,20 @@ export class VerifyPointBreakoutSolver extends BaseSolver {
       ...this.params.routed,
       verification,
       success,
+      obstacles: this.params.prepared.obstacles,
       terminalConflicts: this.params.prepared.terminalConflicts,
+      obstacleConflicts: this.params.prepared.obstacleConflicts,
     }
     this.stats = {
       success,
       intersections: verification.intersections,
       invalidAngles: verification.invalidAngles,
       offBoundaryEndpoints: verification.offBoundaryEndpoints,
+      obstacleCollisions: verification.obstacleCollisions,
       minClearance: verification.minClearance,
+      minObstacleClearance: verification.minObstacleClearance,
       terminalConflicts: this.params.prepared.terminalConflicts.length,
+      obstacleConflicts: this.params.prepared.obstacleConflicts.length,
     }
     this.solved = true
   }
@@ -314,6 +374,7 @@ export class VerifyPointBreakoutSolver extends BaseSolver {
       this.output
         ? `Verify · ${this.output.success ? "valid" : "invalid"} · clearance ${this.output.verification.minClearance.toFixed(3)}`
         : "Verify · waiting",
+      this.params.prepared.obstacles,
     )
   }
 }
@@ -375,6 +436,7 @@ export class PointBreakoutPipelineSolver extends BasePipelineSolver<PointBreakou
       this.inputProblem.points,
       [],
       this.inputProblem.name ?? "Point breakout problem",
+      this.inputProblem.obstacles ?? [],
     )
   }
 
@@ -388,6 +450,7 @@ export class PointBreakoutPipelineSolver extends BasePipelineSolver<PointBreakou
         this.inputProblem.points,
       output.routes,
       `${output.success ? "Solved" : "Unsolved"} · ${output.routedCount}/${this.inputProblem.points.length} routes`,
+      output.obstacles,
     )
   }
 }

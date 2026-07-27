@@ -96,7 +96,8 @@ export default function PointBreakoutSolverPage() {
             </strong>
             <div style={{ color: "#475569", fontSize: 13, marginTop: 4 }}>
               {selectedSample.name} · seed {selectedSample.seed} · {FIELD_SIZE}×
-              {FIELD_SIZE} boundary
+              {FIELD_SIZE} boundary ·{" "}
+              {selectedSample.problem.obstacles?.length ?? 0} obstacles
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>

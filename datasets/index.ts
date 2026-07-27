@@ -1,5 +1,6 @@
 import { densityLadderDataset } from "./dataset01"
 import { resilienceMatrixDataset } from "./dataset02"
+import { rectObstacleDataset } from "./dataset03"
 
 export type {
   PointBreakoutDataset,
@@ -9,4 +10,5 @@ export type {
 export const pointBreakoutDatasets = [
   densityLadderDataset,
   resilienceMatrixDataset,
+  rectObstacleDataset,
 ]

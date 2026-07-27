@@ -3,6 +3,7 @@ export const GRID_STEP = 0.1
 export const ROUTE_WIDTH = 0.1
 export const ROUTE_MARGIN = 0.1
 export const REQUIRED_CENTERLINE_CLEARANCE = ROUTE_WIDTH + ROUTE_MARGIN
+export const REQUIRED_OBSTACLE_CLEARANCE = ROUTE_WIDTH / 2 + ROUTE_MARGIN
 
 const GRID_MAX = Math.round(FIELD_SIZE / GRID_STEP)
 const GRID_NODES = GRID_MAX + 1
@@ -21,11 +22,23 @@ export type Route = {
   path: Point[]
 }
 
+export type RectObstacle = {
+  id?: string
+  center: {
+    x: number
+    y: number
+  }
+  width: number
+  height: number
+}
+
 export type Verification = {
   intersections: number
   invalidAngles: number
   offBoundaryEndpoints: number
+  obstacleCollisions: number
   minClearance: number
+  minObstacleClearance: number
   valid: boolean
 }
 
@@ -49,6 +62,18 @@ type Segment = {
   routeId: number
   a: Point
   b: Point
+}
+
+type IndexedRectObstacle = {
+  index: number
+  obstacle: RectObstacle
+}
+
+export type RectBounds = {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
 }
 
 export type RouteAttemptResult = {
@@ -94,7 +119,32 @@ export function normalizePoint(point: Point): Point {
   }
 }
 
-export function canInsertPoint(points: Point[], candidate: Point) {
+export function getRectBounds(obstacle: RectObstacle): RectBounds {
+  const halfWidth = Math.max(0, obstacle.width) / 2
+  const halfHeight = Math.max(0, obstacle.height) / 2
+  return {
+    minX: obstacle.center.x - halfWidth,
+    maxX: obstacle.center.x + halfWidth,
+    minY: obstacle.center.y - halfHeight,
+    maxY: obstacle.center.y + halfHeight,
+  }
+}
+
+export function pointRectDistance(
+  point: Pick<Point, "x" | "y">,
+  obstacle: RectObstacle,
+): number {
+  const bounds = getRectBounds(obstacle)
+  const dx = Math.max(bounds.minX - point.x, 0, point.x - bounds.maxX)
+  const dy = Math.max(bounds.minY - point.y, 0, point.y - bounds.maxY)
+  return Math.hypot(dx, dy)
+}
+
+export function canInsertPoint(
+  points: Point[],
+  candidate: Point,
+  obstacles: RectObstacle[] = [],
+) {
   if (
     candidate.x < GRID_STEP ||
     candidate.x > FIELD_SIZE - GRID_STEP ||
@@ -104,14 +154,25 @@ export function canInsertPoint(points: Point[], candidate: Point) {
     return false
   }
 
-  return points.every(
-    (point) =>
-      point.id === candidate.id ||
-      distance(point, candidate) >= TERMINAL_PADDING - EPSILON,
+  return (
+    points.every(
+      (point) =>
+        point.id === candidate.id ||
+        distance(point, candidate) >= TERMINAL_PADDING - EPSILON,
+    ) &&
+    obstacles.every(
+      (obstacle) =>
+        pointRectDistance(candidate, obstacle) >=
+        REQUIRED_OBSTACLE_CLEARANCE - EPSILON,
+    )
   )
 }
 
-export function generatePoints(count: number, seed: number): Point[] {
+export function generatePoints(
+  count: number,
+  seed: number,
+  options: { obstacles?: RectObstacle[] } = {},
+): Point[] {
   const target = Math.max(1, Math.min(100, Math.round(count)))
   const random = mulberry32(seed)
   const points: Point[] = []
@@ -130,7 +191,7 @@ export function generatePoints(count: number, seed: number): Point[] {
       y: gy * GRID_STEP,
     }
 
-    if (canInsertPoint(points, candidate)) {
+    if (canInsertPoint(points, candidate, options.obstacles)) {
       points.push(candidate)
     }
   }
@@ -153,7 +214,7 @@ export function generatePoints(count: number, seed: number): Point[] {
 
     for (const candidate of candidates) {
       candidate.id = points.length
-      if (canInsertPoint(points, candidate)) {
+      if (canInsertPoint(points, candidate, options.obstacles)) {
         points.push({ ...candidate })
       }
       if (points.length === target) break
@@ -218,6 +279,32 @@ function segmentDistance(a: Point, b: Point, c: Point, d: Point) {
     pointSegmentDistance(b, c, d),
     pointSegmentDistance(c, a, b),
     pointSegmentDistance(d, a, b),
+  )
+}
+
+export function segmentRectDistance(
+  a: Point,
+  b: Point,
+  obstacle: RectObstacle,
+): number {
+  if (
+    pointRectDistance(a, obstacle) <= EPSILON ||
+    pointRectDistance(b, obstacle) <= EPSILON
+  ) {
+    return 0
+  }
+
+  const bounds = getRectBounds(obstacle)
+  const topLeft = { id: -1, x: bounds.minX, y: bounds.maxY }
+  const topRight = { id: -1, x: bounds.maxX, y: bounds.maxY }
+  const bottomRight = { id: -1, x: bounds.maxX, y: bounds.minY }
+  const bottomLeft = { id: -1, x: bounds.minX, y: bounds.minY }
+
+  return Math.min(
+    segmentDistance(a, b, topLeft, topRight),
+    segmentDistance(a, b, topRight, bottomRight),
+    segmentDistance(a, b, bottomRight, bottomLeft),
+    segmentDistance(a, b, bottomLeft, topLeft),
   )
 }
 
@@ -323,6 +410,61 @@ class TerminalIndex {
   }
 }
 
+class RectObstacleIndex {
+  private readonly bucketSize = 0.5
+  private readonly buckets = new Map<string, IndexedRectObstacle[]>()
+
+  constructor(private readonly obstacles: RectObstacle[]) {
+    for (let index = 0; index < obstacles.length; index += 1) {
+      const obstacle = obstacles[index]
+      const bounds = getRectBounds(obstacle)
+      const minX = Math.floor(bounds.minX / this.bucketSize)
+      const maxX = Math.floor(bounds.maxX / this.bucketSize)
+      const minY = Math.floor(bounds.minY / this.bucketSize)
+      const maxY = Math.floor(bounds.maxY / this.bucketSize)
+      const indexedObstacle = { index, obstacle }
+
+      for (let bx = minX; bx <= maxX; bx += 1) {
+        for (let by = minY; by <= maxY; by += 1) {
+          const key = bucketKey(bx, by)
+          const bucket = this.buckets.get(key)
+          if (bucket) bucket.push(indexedObstacle)
+          else this.buckets.set(key, [indexedObstacle])
+        }
+      }
+    }
+  }
+
+  blocksSegment(a: Point, b: Point) {
+    if (this.obstacles.length === 0) return false
+
+    const padding = REQUIRED_OBSTACLE_CLEARANCE
+    const minX = Math.floor((Math.min(a.x, b.x) - padding) / this.bucketSize)
+    const maxX = Math.floor((Math.max(a.x, b.x) + padding) / this.bucketSize)
+    const minY = Math.floor((Math.min(a.y, b.y) - padding) / this.bucketSize)
+    const maxY = Math.floor((Math.max(a.y, b.y) + padding) / this.bucketSize)
+    const seen = new Set<number>()
+
+    for (let bx = minX; bx <= maxX; bx += 1) {
+      for (let by = minY; by <= maxY; by += 1) {
+        const bucket = this.buckets.get(bucketKey(bx, by))
+        if (!bucket) continue
+        for (const { index, obstacle } of bucket) {
+          if (seen.has(index)) continue
+          seen.add(index)
+          if (
+            segmentRectDistance(a, b, obstacle) <
+            REQUIRED_OBSTACLE_CLEARANCE - EPSILON
+          ) {
+            return true
+          }
+        }
+      }
+    }
+    return false
+  }
+}
+
 class MinHeap {
   private values: Array<{ priority: number; state: number }> = []
 
@@ -405,6 +547,7 @@ function findEscapePath(
   point: Point,
   segmentIndex: SegmentIndex,
   terminalIndex: TerminalIndex,
+  obstacleIndex: RectObstacleIndex,
   seed: number,
 ) {
   const start = {
@@ -459,6 +602,7 @@ function findEscapePath(
       const to = gridToPoint({ gx, gy }, point.id)
       if (segmentIndex.collides(from, to)) continue
       if (terminalIndex.blocksSegment(from, to, point.id)) continue
+      if (obstacleIndex.blocksSegment(from, to)) continue
 
       const nextState = encodeState(gx, gy, direction)
       const stepCost =
@@ -559,9 +703,11 @@ export function runRouteAttempt(
   points: Point[],
   attempt: number,
   seed: number,
+  obstacles: RectObstacle[] = [],
 ): RouteAttemptResult {
   const terminalIndex = new TerminalIndex(points)
   const segmentIndex = new SegmentIndex()
+  const obstacleIndex = new RectObstacleIndex(obstacles)
   const routes: Route[] = []
   const unrouted: number[] = []
   const ordered = orderedPoints(points, attempt, seed)
@@ -571,6 +717,7 @@ export function runRouteAttempt(
       point,
       segmentIndex,
       terminalIndex,
+      obstacleIndex,
       seed + point.id * 131 + attempt * 977,
     )
     if (!path) {
@@ -588,11 +735,16 @@ export function runRouteAttempt(
   return { routes, unrouted }
 }
 
-export function verifyRoutes(routes: Route[]): Verification {
+export function verifyRoutes(
+  routes: Route[],
+  obstacles: RectObstacle[] = [],
+): Verification {
   let intersections = 0
   let invalidAngles = 0
   let offBoundaryEndpoints = 0
+  let obstacleCollisions = 0
   let minClearance = Number.POSITIVE_INFINITY
+  let minObstacleClearance = Number.POSITIVE_INFINITY
 
   for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
     const route = routes[routeIndex]
@@ -608,11 +760,21 @@ export function verifyRoutes(routes: Route[]): Verification {
     }
 
     for (let index = 0; index < route.path.length - 1; index += 1) {
-      const dx = Math.abs(route.path[index + 1].x - route.path[index].x)
-      const dy = Math.abs(route.path[index + 1].y - route.path[index].y)
+      const start = route.path[index]
+      const end = route.path[index + 1]
+      const dx = Math.abs(end.x - start.x)
+      const dy = Math.abs(end.y - start.y)
       const hasLegalAngle =
         dx <= EPSILON || dy <= EPSILON || Math.abs(dx - dy) <= EPSILON
       if (!hasLegalAngle) invalidAngles += 1
+
+      for (const obstacle of obstacles) {
+        const clearance = segmentRectDistance(start, end, obstacle)
+        minObstacleClearance = Math.min(minObstacleClearance, clearance)
+        if (clearance < REQUIRED_OBSTACLE_CLEARANCE - EPSILON) {
+          obstacleCollisions += 1
+        }
+      }
     }
 
     for (
@@ -639,38 +801,50 @@ export function verifyRoutes(routes: Route[]): Verification {
   const normalizedClearance = Number.isFinite(minClearance)
     ? minClearance
     : FIELD_SIZE
+  const normalizedObstacleClearance = Number.isFinite(minObstacleClearance)
+    ? minObstacleClearance
+    : FIELD_SIZE
   return {
     intersections,
     invalidAngles,
     offBoundaryEndpoints,
+    obstacleCollisions,
     minClearance: normalizedClearance,
+    minObstacleClearance: normalizedObstacleClearance,
     valid:
       intersections === 0 &&
       invalidAngles === 0 &&
       offBoundaryEndpoints === 0 &&
-      normalizedClearance >= REQUIRED_CENTERLINE_CLEARANCE - EPSILON,
+      obstacleCollisions === 0 &&
+      normalizedClearance >= REQUIRED_CENTERLINE_CLEARANCE - EPSILON &&
+      normalizedObstacleClearance >= REQUIRED_OBSTACLE_CLEARANCE - EPSILON,
   }
 }
 
 export function solveRoutes(
   input: Point[],
-  options: { seed?: number; maxAttempts?: number } = {},
+  options: {
+    seed?: number
+    maxAttempts?: number
+    obstacles?: RectObstacle[]
+  } = {},
 ): SolveResult {
   const startedAt = performance.now()
   const points = input.map(normalizePoint)
+  const obstacles = options.obstacles ?? []
   const seed = options.seed ?? 815
   const maxAttempts = Math.max(1, options.maxAttempts ?? 7)
   let best = {
     routes: [] as Route[],
     unrouted: points.map((point) => point.id),
   }
-  let bestVerification = verifyRoutes([])
+  let bestVerification = verifyRoutes([], obstacles)
   let attempts = 0
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     attempts = attempt + 1
-    const candidate = runRouteAttempt(points, attempt, seed)
-    const verification = verifyRoutes(candidate.routes)
+    const candidate = runRouteAttempt(points, attempt, seed, obstacles)
+    const verification = verifyRoutes(candidate.routes, obstacles)
     if (
       candidate.routes.length > best.routes.length ||
       (candidate.routes.length === best.routes.length &&
