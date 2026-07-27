@@ -1,7 +1,30 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "@tscircuit/point-breakout-solver",
   "version": "0.1.0",
-  "private": true,
+  "description": "Clearance-aware octilinear routing from interior points to a rectangular boundary.",
+  "license": "MIT",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tscircuit/point-breakout-solver.git"
+  },
+  "homepage": "https://octilinear-boundary-router-lab.seveibar.chatgpt.site",
+  "keywords": [
+    "autorouter",
+    "breakout-routing",
+    "geometry",
+    "octilinear",
+    "tscircuit"
+  ],
+  "types": "./lib/index.ts",
+  "exports": {
+    ".": "./lib/index.ts"
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22.13.0"
   },

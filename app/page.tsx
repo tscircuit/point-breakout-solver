@@ -144,6 +144,8 @@ export default function Home() {
   const [benchmark, setBenchmark] = useState<BenchmarkResult[]>([]);
   const [benchmarking, setBenchmarking] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const initialPointsRef = useRef(points);
+  const initialSeedRef = useRef(seed);
 
   const solve = useCallback((nextPoints: Point[], nextSeed: number) => {
     setStatus("Routing…");
@@ -161,10 +163,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    solve(points, seed);
-    // Initial routing should only run once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const initialSolve = window.setTimeout(
+      () => solve(initialPointsRef.current, initialSeedRef.current),
+      0,
+    );
+    return () => window.clearTimeout(initialSolve);
+  }, [solve]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
