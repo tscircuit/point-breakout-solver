@@ -2,11 +2,16 @@
   "name": "@tscircuit/point-breakout-solver",
   "version": "0.1.0",
   "description": "Clearance-aware octilinear routing from interior points to a rectangular boundary.",
+  "module": "lib/index.ts",
+  "type": "module",
+  "files": [
+    "lib"
+  ],
   "license": "MIT",
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tscircuit/point-breakout-solver.git"
+    "url": "https://github.com/tscircuit/point-breakout-solver.git"
   },
   "homepage": "https://point-breakout-solver.vercel.app",
   "keywords": [
@@ -16,51 +21,34 @@
     "octilinear",
     "tscircuit"
   ],
-  "types": "./lib/index.ts",
-  "exports": {
-    ".": "./lib/index.ts"
-  },
-  "files": [
-    "lib",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=22.13.0"
-  },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
-    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
-    "build:vercel": "next build",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "benchmark": "node --experimental-strip-types scripts/benchmark.mts",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "start": "cosmos",
+    "dev": "cosmos",
+    "build:site": "cosmos-export",
+    "build": "bunx tsc --noEmit",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "benchmark": "bun benchmarks/run-benchmark.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "dependencies": {
-    "drizzle-orm": "0.45.2",
-    "next": "16.2.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "@tscircuit/solver-utils": "0.0.19",
+    "graphics-debug": "0.0.96"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
-    "@tailwindcss/postcss": "4.2.1",
-    "@types/node": "22.19.19",
+    "@biomejs/biome": "2.5.5",
+    "@types/bun": "1.3.14",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
-    "react-server-dom-webpack": "19.2.6",
-    "tailwindcss": "4.2.1",
+    "react": "19.2.8",
+    "react-cosmos": "7.3.0",
+    "react-cosmos-plugin-vite": "7.3.0",
+    "react-dom": "19.2.8",
     "typescript": "5.9.3",
-    "vinext": "0.0.50",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vite": "8.1.5"
   },
-  "type": "module"
+  "peerDependencies": {
+    "typescript": "^5"
+  }
 }
