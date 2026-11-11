@@ -751,6 +751,12 @@ export function verifyRoutes(
     const endpoint = route.path.at(-1)
     if (
       !endpoint ||
+      !(
+        endpoint.x >= -EPSILON &&
+        endpoint.x <= FIELD_SIZE + EPSILON &&
+        endpoint.y >= -EPSILON &&
+        endpoint.y <= FIELD_SIZE + EPSILON
+      ) ||
       (Math.abs(endpoint.x) > EPSILON &&
         Math.abs(endpoint.y) > EPSILON &&
         Math.abs(endpoint.x - FIELD_SIZE) > EPSILON &&
